@@ -37,3 +37,8 @@ jspm_packages
 .node_repl_history
 
 lib/
+.vscode/
+
+.db
+.sqlite
+.sqlite3
