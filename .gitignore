@@ -39,6 +39,5 @@ jspm_packages
 lib/
 .vscode/
 
-.db
-.sqlite
-.sqlite3
+*.db
+*.sqlite*

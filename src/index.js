@@ -4,17 +4,15 @@ const config = require('../config');
 
 const uuid = require('uuid');
 
-// const lodash = require('lodash');
 const Koa = require('koa');
 const route = require('koa-route');
-const passport = require('koa-passport');
-// const passport = require('passport');
-require('./passport');
 
 const app = new Koa();
 
 app.use(require('koa-body')());
 
+const passport = require('koa-passport');
+require('./passport');
 app.use(passport.initialize());
 
 app.use(async function parse_jwt(ctx, next) {
@@ -23,73 +21,50 @@ app.use(async function parse_jwt(ctx, next) {
   await next();
 });
 
-// // 但是这种逻辑好像还有很多问题。。。另外 graphql 的多个 mutation 是并列事务。并列事务如何对应 session 一个事务，似乎有逻辑问题。
-// app.use(async function transactions(ctx, next) {
-//   // 这个中间件仅仅是为了把 session 的保存也放进事务中
-//   await next();
-//   commit(ctx.transactions);
-//   function commit(ts) {
-//     // 深度优先遍历，从而先提交子事务，后提交父事务
-//     (ts.subs || []).forEach(sub_ts => commit(sub_ts));
-//     ts.commit();
-//   }
-// });
-
 const { default: session } = require('koa-lazy-multi-session');
 const { default: Store } = require('knex-schema-session-store');
 const store = new Store(config.knex, {
   schemas: [
-    { name: 'user_id', type: 'string', extra: cb=>cb.notNullable() }
+    { name: 'sess_name', type: 'string', extra: cb=>cb.notNullable(), },
+    { name: 'user_id', type: 'string', extra: cb=>cb.notNullable(), },
   ]
 });
 
 app.use(session({
   get_sid: ctx => ctx.state.jwt && ctx.state.jwt.sid,
-  max_age: 7*24*60*60*1000,
   store,
 }));
 
-app.use(route.post('/login_local', async function login(ctx, next) {
-  // let {user, info} = await new Promise((resolve, reject) => {
-  //   passport.authenticate(['pure', 'local'], (err, user, info) => {
-  //     if (err) {
-  //       reject({err, info});
-  //     } else {
-  //       resolve({user, info});
-  //     }
-  //   })(ctx, next);
-  // });
-
-  // passport.authenticate 的参数本质上是 passport.authenticate(names, options | callback)，有了 callback，就无视 options，哪怕你传入了 options。。。
-  // 它们两者起到的作用是一致的，都是认证结束（成功/失败）之后的操作，而且 options 中有 session:boolean 属性，就可以说明它是定义认证结束后的操作。。。所以，应该在 callback里初始化 session
-  // 另外，这个 koa-passport 的 passport.authenticate 函数的 callback 函数必须是同步函数，或者返回 promise。。。
-  // 于是这里，FALSE_NULL 是认证正常结束，即 callback 没有 reject，没有 throw。。。如果被 reject 或 throw，则调用 next()。。。或者说整个 promise 只要没有 resolve(false) 就 next()。而 resolve(false) 只有在传 callback，且 callback 正常结束下才会有
-  // 原理
-  // 看 koa-passport 和 passport 的源代码。koa-passport 中有句`middleware(req, res).then(resolve, reject)`，然后 middleware 本身内包含 callback，callback内包含这里传过去的 callback，也包含这句后面的 .then(resolve,reject) 中的 resolve,reject 。。。然后 then 的调用依赖于 middleware 内调用了 express 的 middleware(req, res, next) 的 next 函数。。。
-  // 也就是 `middleware(req, res).then(resolve, reject)` 相当于 `middleware(req, res, (err, result)=>err?reject(err):resolve(result))`...
-  // 然后进入 passport，而不是 koa-passport 的控制流程...在 passport 中，如果有 callback，则根本不会调用啥 next 函数。。。也就是 middleware 中自带的 callback中的 resolve,reject 与这里传的 resolve,reject 本来是可能出现重复 resolve 一个 promise 的情况的，但是因为有 callback 就无 options，不会运行 next，所以，最终不会出现重复 resolve 的情况。
-  let FALSE_NULL_OR_NEXT = await passport.authenticate(['pure', 'local'], async (err, user, info, status) => {
-    // 这里负责返回响应 和 持久化 session
-    let sid = uuid();
-    await ctx.session('sid', sid);
-    await ctx.session('user_id', user._id);
-    await ctx.session('user', user);
-    let token = config.jwt.sign({sid, uid: user._id}, { expiresIn: '7d' });
-    ctx.body = { token, user };
+app.use(route.post('/token', async function login(ctx, next) {
+  let FALSE_NULL_OR_NEXT = await passport.authenticate(['local', 'token'], async (err, user, info, status) => {
+    if (user) {
+      let sid = uuid();
+      await ctx.session({ sid, sess_name: ctx.request.body.sess_name || sid, user_id: user._id, user });
+      let token = config.jwt.sign({sid, user_id: user._id}, { expiresIn: '7d', noTimestamp: true });
+      ctx.body = { token, user };
+    } else {
+      ctx.body = info;
+    }
   })(ctx, next);
 }));
 
-// // 其实是可以这样的，但是这样就访问不到 ctx 和 next 了，不能定义 options 定义过的之外的自定义的认证结束后的操作。。。所以这种用法没有任何意义
-// app.use(route.post('/login_local', passport.authenticate(['pure', 'local'], async (err, user, info, status) => {
-// })));
+app.use(route.get('/oauth', async function oauth(ctx, next) {
+  // 这里覆盖 callbackURL 是因为如何把 token 传给客户端。这个 callbackURL 是微信服务器命令浏览器跳转过来的，然后服务器接收到该路径，汲取 code，获取 user，然后以 json 的形式发送 token。。。但是，页面呢？整个页面只是一个 json。。。显然行不通的。。。可以把页面和 json形式的token 一块发送给浏览器，这要 html 组装，也蛮麻烦的。。。更重要的是，完全可能客户端是单页应用，服务器仅仅是一个 API 服务器，两者的域名完全不同。。。
+  // 所以更好的流程是让 code 经手客户端代码，而不仅仅是一个 redirect。。。callbackURL 是客户端的页面，然后页面逻辑里得到自己的 code，于是带上 code 请求服务端，让服务端带上 code 去请求微信服务器，得到 profile user，返回 json形式的token，客户端把 token 存储起来。。。不过这样有问题是（其实就算不这样，仅仅是 redirect 一样有此问题），如果微信服务器的 code 不是一次性的，那么因为 code 经过了浏览器，所以用户只要前进后退一下，就从登出变为登录了。。。当然，客户端可以在获取到 token 以后 history.replace 一下，这比单纯的 redirect 好多了
+  // 另外，一个登录服务端可能也对应多个客户端，所以需要客户端提供 callbackURL
+  // 应该还有 better practice ，充分利用 iframe window.postMessage 等方法跨域
+  await passport.authenticate(['wechat'], { callbackURL: req.query.callbackURL }, async (err, user, info, status) => {
+    if (user) {
+      let sid = uuid();
+      await ctx.session({ sid, sess_name: ctx.request.body.sess_name || sid, user_id: user._id, user });
+      let token = config.jwt.sign({sid, user_id: user._id}, { expiresIn: '7d', noTimestamp: true });
+      ctx.body = { token, user };
+    } else {
+      ctx.body = info;
+    }
+  })(ctx, next);
+}));
 
-// // 另外如果类似 express 可以有下面的写法。。。它是 authenticate 返回一个 middleware，接着一个 middleware，受上一个 middleware 控制。。。但这对于 koa 是没必要的。。。koa 也没有这种写法
-// // 因为 app.use 只接收一个参数，不接受不定长参数。。。route.post 也是一样，不接受不定长函数列表参数
-// app.use(route.post('/login_local', passport.authenticate(['pure', 'local'], async (err, user, info, status) => {
-
-// }), async function(ctx, next) {
-
-// }));
 
 app.use(route.get('/me', async function(ctx, next) {
   ctx.body = await ctx.session();
@@ -110,7 +85,7 @@ app.use(route.post('/me_change', async function(ctx, next) {
   await ctx.session('sid', sid);
   let sess = await ctx.session();
   let user = sess.user;
-  let token = config.jwt.sign({sid, uid: user._id}, { expiresIn: '7d' });
+  let token = config.jwt.sign({sid, user_id: user._id}, { expiresIn: '7d', noTimestamp: true });
   ctx.body = { token, user };
 }));
 
