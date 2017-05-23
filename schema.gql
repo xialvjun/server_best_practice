@@ -1,0 +1,6 @@
+type Favorite {
+  _id: ID!
+  url: String!
+  tags: [String]!
+  paths: [String]!
+}

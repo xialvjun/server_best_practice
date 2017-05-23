@@ -35,6 +35,30 @@ app.use(session({
   store,
 }));
 
+const create_loaders = require('./loaders.js');
+// 让 ctx.loaders.a_loader   ctx.loaders.b_loader
+app.use(create_loaders);
+
+const graphqlHTTP = require('koa-graphql');
+const schema = require('./schema.js');
+// app.use(route.all('/graphql', async function graphql(ctx, next) {
+//   const startTime = Date.now();
+//   return graphqlHTTP({
+//     schema,
+//     graphiql: true,
+//     context: ctx,  // the default context is ctx
+//     extensions({ document, variables, operationName, result }) {
+//       return { runTime: Date.now() - startTime };
+//     }
+//   })(ctx, next);
+// }));
+app.use(route.all('/graphql', graphqlHTTP({
+  schema,
+  graphiql: true,
+  // the default context is ctx
+  // 使用 ctx 的 session ，但不要使用 ctx.assert  ctx.throw 那些方法。。。由 graphql 来处理错误。。。当然，使用 ctx.throw 也不会有问题
+})));
+
 app.use(route.post('/tokens', async function login(ctx, next) {
   let FALSE_NULL_OR_NEXT = await passport.authenticate(['local', 'token'], async (err, user, info, status) => {
     if (user) {
