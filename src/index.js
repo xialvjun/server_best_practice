@@ -35,9 +35,9 @@ app.use(session({
   store,
 }));
 
-const create_loaders = require('./loaders.js');
+// const create_loaders = require('./loaders.js');
 // 让 ctx.loaders.a_loader   ctx.loaders.b_loader
-app.use(create_loaders);
+// app.use(create_loaders);
 
 const graphqlHTTP = require('koa-graphql');
 const schema = require('./schema.js');

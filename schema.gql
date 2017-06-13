@@ -1,6 +1,78 @@
-type Favorite {
-  _id: ID!
+# type Favorite {
+#   _id: ID!
+#   url: String!
+#   tags: [String]!
+#   paths: [String]!
+# }
+
+# type A {
+#   f: Favorite
+# }
+
+# type Query {
+#   a: A
+#   f: Favorite
+#   c: Int
+# }
+
+# type Mutation {
+#   a(b: Int): A
+# }
+
+# schema {
+#   query: Query
+#   mutation: Mutation
+# }
+
+type File {
   url: String!
-  tags: [String]!
-  paths: [String]!
+  desc: String
+  # 根据文件后缀名来判断资源种类，从而在客户端预览文件
+  suffix: String!
+}
+
+type Alpha {
+  id: ID!
+  title: String!
+  desc: String
+  files: [File!]!
+}
+
+type Beta {
+  id: ID!
+  title: String!
+  desc: String
+  files: [File!]!
+  approved: Boolean
+  alpha_deps: [Alpha!]!
+  beta_deps: [Beta!]!
+}
+
+enum Platform {
+  web
+  wechat
+  bilibili
+}
+
+# 当 platform 为 web 时，自动是 approved
+enum PublishStatus {
+  # 已发布，但平台尚未审核 或 未审核通过
+  published
+  # 平台已审核通过，已经可以正常访问
+  approved
+  # 已下架
+  retrieved
+}
+
+type Release {
+  id: ID!
+  title: String!
+  beta: Beta!
+  platform: Platform!
+  # 用来实现统一化管理多平台发布
+  status: PublishStatus!
+}
+
+type Query {
+  a: String
 }
